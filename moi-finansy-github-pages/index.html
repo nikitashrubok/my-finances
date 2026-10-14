@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6fa">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Мои финансы">
+  <title>Мои финансы</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <main class="container">
+    <header class="top"><h1>Мои финансы</h1><button id="loginBtn" class="login" type="button">Войти в Google</button></header>
+    <div id="authStatus" class="notice">Для работы с Google Таблицей необходимо войти в Google.</div>
+
+    <section id="tab-add" class="page active">
+      <div class="card">
+        <h2 id="formTitle">Новый расход</h2>
+        <form id="expenseForm">
+          <label for="amount">Сумма, BYN</label>
+          <input id="amount" type="number" step="0.01" inputmode="decimal" placeholder="Например, 25.50" required>
+          <p class="hint">Положительная сумма увеличивает расходы, отрицательная — уменьшает.</p>
+          <label for="category">Категория</label><select id="category" required></select>
+          <label for="subcategory">Подкатегория</label><select id="subcategory"></select>
+          <label for="comment">Комментарий</label><input id="comment" maxlength="200" placeholder="Необязательно">
+          <label for="date">Дата операции</label><div class="date-wrap"><input id="date" type="date" required></div>
+          <button id="saveBtn" class="primary" type="submit">Добавить операцию</button>
+          <button id="cancelBtn" class="secondary hidden" type="button">Отменить редактирование</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="tab-stats" class="page">
+      <div class="card"><h2>Период</h2><div class="row"><select id="monthFilter" aria-label="Месяц"></select><button id="currentMonthBtn" class="small-btn" type="button">Сейчас</button></div></div>
+      <div class="card"><div class="muted">Общие расходы</div><div id="balance" class="balance">0,00 BYN</div><div id="periodCaption" class="caption"></div><div id="comparison" class="comparison"></div></div>
+      <div class="card"><h2>Динамика расходов</h2><label for="trendCategory">Категория</label><select id="trendCategory"></select><div class="trend-box"><canvas id="trendChart"></canvas></div><p class="hint footnote">Последние 12 месяцев, включая текущий. Возвраты уменьшают расходы.</p></div>
+      <div class="card"><h2>Расходы по категориям</h2><div class="pie-box"><canvas id="categoryChart"></canvas></div><div id="categoryLegend" class="legend"></div></div>
+      <div class="card"><h2>Расходы по подкатегориям</h2><label for="chartCategoryFilter">Категория</label><select id="chartCategoryFilter"></select><div class="pie-box"><canvas id="subcategoryChart"></canvas></div><div id="subcategoryLegend" class="legend"></div></div>
+    </section>
+
+    <section id="tab-history" class="page">
+      <div class="card"><h2>История операций</h2><div id="historyPeriodCaption" class="caption"></div>
+        <div class="history-controls"><label for="historySort">Сортировка</label>
+          <select id="historySort">
+            <option value="date-desc">Сначала новые</option><option value="date-asc">Сначала старые</option>
+            <option value="amount-desc">Сначала дорогие</option><option value="amount-asc">Сначала дешёвые</option>
+            <option value="category-asc">Категория: А–Я</option><option value="category-desc">Категория: Я–А</option>
+          </select>
+        </div><div id="transactionsList" class="empty">Войдите в Google, чтобы загрузить операции.</div>
+      </div>
+    </section>
+  </main>
+  <nav class="bottom-nav" aria-label="Навигация">
+    <button class="nav-btn active" data-tab="add" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span>Добавить</span></button>
+    <button class="nav-btn" data-tab="stats" type="button"><svg viewBox="0 0 24 24"><path d="M4 20v-8M10 20V5M16 20v-9M22 20V8"/></svg><span>Статистика</span></button>
+    <button class="nav-btn" data-tab="history" type="button"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h12"/></svg><span>История</span></button>
+  </nav>
+</body>
+</html>
