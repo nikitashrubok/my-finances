@@ -24,6 +24,9 @@ const COLORS=['#2563eb','#16a34a','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec48
 const $=id=>document.getElementById(id);
 let accessToken='';
 let tokenClient=null;
+let tokenExpiresAt=0;
+let silentAttempted=false;
+let silentRequest=false;
 let sheetId=null;
 let transactions=[];
 let filtered=[];
@@ -54,31 +57,57 @@ function totalMonth(month,category='all'){return sum(transactions.filter(x=>x.da
 function makeOption(select,value,label){const o=document.createElement('option');o.value=value;o.textContent=label;select.appendChild(o);}
 function setBusy(flag){busy=flag;$('saveBtn').disabled=flag;$('saveBtn').textContent=flag?'Сохранение...':editingId?'Сохранить изменения':'Добавить операцию';}
 
-// OAuth через Google Identity Services. Токен хранится только в памяти вкладки.
+// GIS: access token хранится только в памяти, без localStorage.
+// На iOS тихая авторизация может быть недоступна: это ограничение браузера.
 function initAuth(){
+  if(tokenClient)return;
   if(!CONFIG.CLIENT_ID.includes('.apps.googleusercontent.com')||CONFIG.SPREADSHEET_ID.startsWith('ВСТАВЬ_')){
-    notice('Сначала укажи CLIENT_ID и SPREADSHEET_ID в app.js. Инструкция — в README.md.','error');return;
+    notice('Проверь CLIENT_ID и SPREADSHEET_ID в app.js.','error');return;
   }
-  if(!window.google?.accounts?.oauth2){notice('Не загрузилась библиотека входа Google. Проверь интернет и блокировщики.','error');return;}
+  if(!window.google?.accounts?.oauth2)return;
   tokenClient=google.accounts.oauth2.initTokenClient({
-    client_id:CONFIG.CLIENT_ID,scope:CONFIG.SCOPE,
+    client_id:CONFIG.CLIENT_ID,
+    scope:CONFIG.SCOPE,
     callback:async response=>{
-      if(response.error){notice('Ошибка входа: '+response.error,'error');return;}
+      const wasSilent=silentRequest;
+      silentRequest=false;
+      if(response.error){
+        if(!wasSilent)notice('Ошибка входа: '+response.error,'error');
+        return;
+      }
       accessToken=response.access_token;
+      tokenExpiresAt=Date.now()+(Math.max(0,Number(response.expires_in)||3600)-60)*1000;
       $('loginBtn').textContent='Сменить аккаунт';
       notice('Подключено к Google Таблице.','ok');
       try{await loadTransactions();}catch(e){handleError(e);}
     },
-    error_callback:err=>notice('Окно входа Google не открылось. Попробуй войти через Safari, а затем открыть ярлык снова. '+(err.type||''),'error')
+    error_callback:err=>{
+      const wasSilent=silentRequest;
+      silentRequest=false;
+      if(!wasSilent)notice('Не удалось открыть окно Google: '+(err.type||'проверь настройки браузера'),'error');
+    }
   });
+  trySilentSignIn();
 }
-function signIn(){if(!tokenClient){initAuth();if(!tokenClient)return;}tokenClient.requestAccessToken({prompt:accessToken?'select_account':'consent'});}
+function trySilentSignIn(){
+  if(!tokenClient||silentAttempted||accessToken)return;
+  silentAttempted=true;
+  silentRequest=true;
+  try{tokenClient.requestAccessToken({prompt:''});}
+  catch(e){silentRequest=false;console.info('Тихий вход недоступен:',e);}
+}
+function signIn(){
+  if(!tokenClient){initAuth();if(!tokenClient){notice('Библиотека Google ещё загружается. Повтори попытку.','error');return;}}
+  silentRequest=false;
+  // Не запрашиваем consent принудительно при каждом входе.
+  tokenClient.requestAccessToken({prompt:accessToken?'select_account':''});
+}
 async function api(path,method='GET',body=null){
   if(!accessToken)throw Error('Сначала войди в Google.');
   const url='https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(CONFIG.SPREADSHEET_ID)+path;
   const r=await fetch(url,{method,headers:{'Authorization':'Bearer '+accessToken,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
   let data;try{data=await r.json();}catch{data={};}
-  if(!r.ok){if(r.status===401){accessToken='';$('loginBtn').textContent='Войти в Google';}
+  if(!r.ok){if(r.status===401){accessToken='';tokenExpiresAt=0;$('loginBtn').textContent='Войти в Google';}
     throw Error((data.error?.message||'Ошибка Google API')+' (HTTP '+r.status+')');}
   return data;
 }
@@ -134,7 +163,7 @@ function sortedHistory(){const arr=[...filtered];switch($('historySort').value){
 function renderHistory(){const el=$('transactionsList');el.replaceChildren();const items=sortedHistory();if(!items.length){el.className='empty';el.textContent='Нет операций за выбранный период';return;}el.className='';items.forEach(t=>{const row=document.createElement('div');row.className='transaction';const info=document.createElement('div');info.className='transaction-info';const title=document.createElement('div');title.className='transaction-title';title.textContent=t.category;const sub=document.createElement('div');sub.className='transaction-sub';sub.textContent=t.subcategory||'Без подкатегории';const date=document.createElement('div');date.className='transaction-date';date.textContent=dateLabel(t.date)+(t.comment?' · '+t.comment:'');info.append(title,sub,date);const right=document.createElement('div');right.className='transaction-right';const amount=document.createElement('div');amount.className='transaction-amount '+(t.amount<0?'refund':'expense');amount.textContent=money(t.amount);const actions=document.createElement('div');actions.className='actions';const edit=document.createElement('button');edit.type='button';edit.textContent='Изменить';edit.addEventListener('click',()=>editItem(t.id));const del=document.createElement('button');del.type='button';del.className='delete';del.textContent='Удалить';del.addEventListener('click',()=>removeItem(t.id));actions.append(edit,del);right.append(amount,actions);row.append(info,right);el.appendChild(row);});}
 function editItem(id){if(busy)return;const t=transactions.find(x=>x.id===id);if(!t)return;editingId=id;$('amount').value=t.amount;const cat=$('category');if(![...cat.options].some(o=>o.value===t.category))makeOption(cat,t.category,t.category);cat.value=t.category;updateSubcategories();const sub=$('subcategory');if(t.subcategory&&![...sub.options].some(o=>o.value===t.subcategory))makeOption(sub,t.subcategory,t.subcategory);sub.value=t.subcategory;$('comment').value=t.comment;$('date').value=t.date;$('formTitle').textContent='Редактирование расхода';$('cancelBtn').classList.remove('hidden');setBusy(false);switchTab('add');}
 function resetForm(){$('expenseForm').reset();editingId=null;$('formTitle').textContent='Новый расход';$('cancelBtn').classList.add('hidden');initCategories();$('date').value=today();setBusy(false);}
-async function saveItem(e){e.preventDefault();if(busy)return;if(!accessToken){notice('Сначала войди в Google.','error');return;}const amount=Number($('amount').value);if(!Number.isFinite(amount)||amount===0||Math.abs(amount)>1e9||Math.abs(amount*100-Math.round(amount*100))>1e-6){alert('Введите корректную ненулевую сумму с точностью до 2 знаков.');return;}const data={amount,category:$('category').value,subcategory:$('subcategory').value,comment:$('comment').value.trim(),date:$('date').value};if(!data.category||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)){alert('Выбери категорию и дату.');return;}const id=editingId;setBusy(true);try{if(id)await updateTransaction(id,data);else await addTransaction(data);resetForm();await loadTransactions();notice('Операция сохранена.','ok');}catch(err){handleError(err);}finally{setBusy(false);}}
+async function saveItem(e){e.preventDefault();if(busy)return;if(!accessToken||Date.now()>=tokenExpiresAt){notice('Сессия Google истекла. Нажми «Войти в Google», затем сохрани операцию.','error');return;}const amount=Number($('amount').value);if(!Number.isFinite(amount)||amount===0||Math.abs(amount)>1e9||Math.abs(amount*100-Math.round(amount*100))>1e-6){alert('Введите корректную ненулевую сумму с точностью до 2 знаков.');return;}const data={amount,category:$('category').value,subcategory:$('subcategory').value,comment:$('comment').value.trim(),date:$('date').value};if(!data.category||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)){alert('Выбери категорию и дату.');return;}const id=editingId;setBusy(true);try{if(id)await updateTransaction(id,data);else await addTransaction(data);resetForm();await loadTransactions();notice('Операция сохранена.','ok');}catch(err){handleError(err);}finally{setBusy(false);}}
 async function removeItem(id){if(busy||!confirm('Удалить операцию из Google Таблицы?'))return;setBusy(true);try{await deleteTransaction(id);if(editingId===id)resetForm();await loadTransactions();notice('Операция удалена.','ok');}catch(e){handleError(e);}finally{setBusy(false);}}
 function aggregate(items,field){const sums=new Map();items.forEach(t=>{const key=t[field]||(field==='category'?'Без категории':'Без подкатегории');sums.set(key,(sums.get(key)||0)+Math.round(t.amount*100));});return [...sums].filter(([,c])=>c>0).map(([name,c])=>({name,value:c/100})).sort((a,b)=>b.value-a.value);}
 function destroy(name){if(charts[name]){charts[name].destroy();charts[name]=null;}}
@@ -156,7 +185,14 @@ function init(){
   $('chartCategoryFilter').addEventListener('change',()=>pie('subcategory','subcategoryChart','subcategoryLegend',aggregate(filtered.filter(x=>x.category===$('chartCategoryFilter').value),'subcategory')));
   document.querySelectorAll('.nav-btn').forEach(x=>x.addEventListener('click',()=>switchTab(x.dataset.tab)));
   $('loginBtn').addEventListener('click',signIn);
-  // GIS загружается асинхронно. Повторная инициализация произойдёт при нажатии «Войти».
+  // Дожидаемся асинхронной загрузки GIS и пробуем тихую авторизацию один раз.
   if(window.google?.accounts?.oauth2)initAuth();
+  else {
+    let attempts=0;
+    const timer=setInterval(()=>{
+      if(window.google?.accounts?.oauth2){clearInterval(timer);initAuth();}
+      else if(++attempts>=40){clearInterval(timer);notice('Не загрузилась библиотека Google. Проверь подключение.','error');}
+    },250);
+  }
 }
 document.addEventListener('DOMContentLoaded',init);
